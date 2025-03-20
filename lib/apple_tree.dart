@@ -1,9 +1,9 @@
-import 'package:array_course/Classes/tree.dart';
-import 'package:array_course/ball_to_goal.dart';
 import 'package:flame/components.dart';
 import 'package:flame/events.dart';
 import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
+import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter_vibrate/flutter_vibrate.dart';
 import 'dart:async';
 
 class ActivityOne extends StatelessWidget {
@@ -14,12 +14,19 @@ class ActivityOne extends StatelessWidget {
     return Scaffold(
       body: Stack(
         children: [
-          GameWidget(game: ApplePickingGame(
-            onActivityComplete: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                  builder: (context) => const CongratulationsScreen()),
+          GameWidget(game: AppleGame(onActivityComplete: () {
+            showDialog(
+              context: context,
+              builder: (context) => AlertDialog(
+                title: const Text("🎉 تهانينا!"),
+                content: const Text("لقد أكملت النشاط الأول بنجاح!"),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text("حسنًا"),
+                  ),
+                ],
+              ),
             );
           })),
         ],
@@ -28,7 +35,7 @@ class ActivityOne extends StatelessWidget {
   }
 }
 
-class ApplePickingGame extends FlameGame {
+class AppleGame extends FlameGame {
   final VoidCallback onActivityComplete;
   late TextComponent instructionText;
   late Timer instructionTimer;
@@ -36,15 +43,18 @@ class ApplePickingGame extends FlameGame {
   bool assistanceShown = false;
   int successfulAttempts = 0;
   int totalAttempts = 0;
+  int currentAttempt = 0;
+  bool isRightPhase = true;
+  int phaseCount = 0;
   late Arrow arrow;
+  final AudioPlayer player = AudioPlayer();
 
-  ApplePickingGame({required this.onActivityComplete}) {
+  AppleGame({required this.onActivityComplete}) {
     instructionTimer = Timer(5, onTick: showAssistance, repeat: false);
   }
 
   @override
   Future<void> onLoad() async {
-    add(Tree());
     add(Basket(position: Vector2(50, 500), isLeft: true));
     add(Basket(position: Vector2(300, 500), isLeft: false));
 
@@ -55,37 +65,30 @@ class ApplePickingGame extends FlameGame {
     );
     add(instructionText);
 
+    add(Apple(position: Vector2(200, 400), gameRef: this));
+
     arrow = Arrow();
     add(arrow);
 
-    for (int i = 0; i < 10; i++) {
-      add(Apple(
-          position: Vector2(100 + (i % 5) * 50, 200 + (i ~/ 5) * 50),
-          gameRef: this));
-    }
-
-    generateNewInstruction();
+    updateInstruction();
   }
 
-  void generateNewInstruction() {
-    currentInstruction = (DateTime.now().second % 2 == 0)
-        ? "ضع التفاحة في السلة اليسرى"
-        : "ضع التفاحة في السلة اليمنى";
-    instructionText.text = currentInstruction;
+  void updateInstruction() {
+    instructionText.text = isRightPhase
+        ? "ضع التفاحة في السلة اليمنى"
+        : "ضع التفاحة في السلة اليسرى";
     instructionTimer.start();
     assistanceShown = false;
-
     arrow.hide();
   }
 
   void showAssistance() {
     if (!assistanceShown) {
       assistanceShown = true;
-
-      if (currentInstruction.contains("اليسرى")) {
-        arrow.show(Vector2(100, 450));
-      } else {
+      if (isRightPhase) {
         arrow.show(Vector2(350, 450));
+      } else {
+        arrow.show(Vector2(100, 450));
       }
     }
   }
@@ -94,12 +97,36 @@ class ApplePickingGame extends FlameGame {
     totalAttempts++;
     if (isCorrect) {
       successfulAttempts++;
+      player.play(AssetSource('assets/sounds/correct.mp3'));
+    } else {
+      player.play(AssetSource('assets/sounds/wrong.mp3'));
+      Vibrate.feedback(FeedbackType.error);
     }
 
-    if (successfulAttempts / totalAttempts >= 0.8 && totalAttempts >= 10) {
-      onActivityComplete();
+    currentAttempt++;
+    if (currentAttempt >= 5) {
+      nextPhase();
+    }
+  }
+
+  void nextPhase() {
+    currentAttempt = 0;
+    phaseCount++;
+
+    if (phaseCount == 5) {
+      isRightPhase = false;
+    }
+
+    if (phaseCount >= 10) {
+      checkCompletion();
     } else {
-      generateNewInstruction();
+      updateInstruction();
+    }
+  }
+
+  void checkCompletion() {
+    if (successfulAttempts / totalAttempts >= 0.8) {
+      onActivityComplete();
     }
   }
 }
@@ -117,7 +144,7 @@ class Basket extends SpriteComponent {
 }
 
 class Apple extends SpriteComponent with DragCallbacks {
-  final ApplePickingGame gameRef;
+  final AppleGame gameRef;
 
   Apple({required Vector2 position, required this.gameRef})
       : super(size: Vector2(50, 50), position: position);
@@ -135,9 +162,8 @@ class Apple extends SpriteComponent with DragCallbacks {
   @override
   void onDragEnd(DragEndEvent event) {
     super.onDragEnd(event);
-    bool correctBasket =
-        (position.x < 200 && gameRef.currentInstruction.contains("اليسرى")) ||
-            (position.x > 200 && gameRef.currentInstruction.contains("اليمنى"));
+    bool correctBasket = (position.x < 200 && !gameRef.isRightPhase) ||
+        (position.x > 200 && gameRef.isRightPhase);
 
     gameRef.checkAttempt(correctBasket);
     gameRef.arrow.hide();
@@ -159,35 +185,5 @@ class Arrow extends SpriteComponent {
 
   void hide() {
     position = Vector2(-100, -100);
-  }
-}
-
-class CongratulationsScreen extends StatelessWidget {
-  const CongratulationsScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Text("🎉تهانينا! 🎉",
-                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 20),
-            GestureDetector(
-              onTap: () {
-                Navigator.pushReplacement(
-                  context,
-                  MaterialPageRoute(builder: (context) => const ActivityTwo()),
-                );
-              },
-              child:
-                  const Icon(Icons.arrow_forward, size: 50, color: Colors.blue),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 }

@@ -2,6 +2,8 @@ import 'package:flame/components.dart';
 import 'package:flame/events.dart';
 import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
+import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter_vibrate/flutter_vibrate.dart';
 import 'dart:async';
 
 class ActivityTwo extends StatelessWidget {
@@ -41,7 +43,10 @@ class BallGame extends FlameGame {
   bool assistanceShown = false;
   int successfulAttempts = 0;
   int totalAttempts = 0;
+  int currentAttempt = 0;
+  bool isRightPhase = true;
   late Arrow arrow;
+  final AudioPlayer player = AudioPlayer();
 
   BallGame({required this.onActivityComplete}) {
     instructionTimer = Timer(5, onTick: showAssistance, repeat: false);
@@ -64,28 +69,23 @@ class BallGame extends FlameGame {
     arrow = Arrow();
     add(arrow);
 
-    generateNewInstruction();
+    updateInstruction();
   }
 
-  void generateNewInstruction() {
-    currentInstruction = (DateTime.now().second % 2 == 0)
-        ? "ضع الكرة في الشبكة اليسرى"
-        : "ضع الكرة في الشبكة اليمنى";
-    instructionText.text = currentInstruction;
+  void updateInstruction() {
+    instructionText.text = isRightPhase ? "ضع الكرة في الشبكة اليمنى" : "ضع الكرة في الشبكة اليسرى";
     instructionTimer.start();
     assistanceShown = false;
-
     arrow.hide();
   }
 
   void showAssistance() {
     if (!assistanceShown) {
       assistanceShown = true;
-
-      if (currentInstruction.contains("اليسرى")) {
-        arrow.show(Vector2(100, 450));
-      } else {
+      if (isRightPhase) {
         arrow.show(Vector2(350, 450));
+      } else {
+        arrow.show(Vector2(100, 450));
       }
     }
   }
@@ -94,12 +94,35 @@ class BallGame extends FlameGame {
     totalAttempts++;
     if (isCorrect) {
       successfulAttempts++;
-    }
-
-    if (successfulAttempts / totalAttempts >= 0.8 && totalAttempts >= 10) {
-      onActivityComplete();
+      player.play(AssetSource('assets/sounds/correct.mp3'));
     } else {
-      generateNewInstruction();
+      player.play(AssetSource('assets/sounds/wrong.mp3'));
+      Vibrate.feedback(FeedbackType.error);
+    }
+    
+    currentAttempt++;
+    if (currentAttempt >= 5) {
+      nextPhase();
+    } else {
+      updateInstruction();
+    }
+  }
+
+  void nextPhase() {
+    currentAttempt = 0;
+    if (isRightPhase && totalAttempts >= 5) {
+      isRightPhase = false;
+    }
+    if (totalAttempts >= 10) {
+      checkCompletion();
+    } else {
+      updateInstruction();
+    }
+  }
+
+  void checkCompletion() {
+    if (successfulAttempts / totalAttempts >= 0.8) {
+      onActivityComplete();
     }
   }
 }
@@ -136,8 +159,8 @@ class Ball extends SpriteComponent with DragCallbacks {
   void onDragEnd(DragEndEvent event) {
     super.onDragEnd(event);
     bool correctBasket =
-        (position.x < 200 && gameRef.currentInstruction.contains("اليسرى")) ||
-            (position.x > 200 && gameRef.currentInstruction.contains("اليمنى"));
+        (position.x < 200 && !gameRef.isRightPhase) ||
+            (position.x > 200 && gameRef.isRightPhase);
 
     gameRef.checkAttempt(correctBasket);
     gameRef.arrow.hide();
